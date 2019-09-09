@@ -96,6 +96,14 @@
   :group 'magit-gerrit
   :type 'key-sequence)
 
+;;;###autoload
+(eval-after-load "magit"
+  '(progn
+     (magit-define-popup-action 'magit-dispatch-popup
+       ?R "Gerrit" #'magit-gerrit-popup ?!)
+     (define-key magit-status-mode-map
+       "R" #'magit-gerrit-popup)))
+
 (defun gerrit-command (cmd &rest args)
   (let ((gcmd (concat
 	       "-x -p 29418 "
@@ -248,7 +256,7 @@ Succeed even if branch already exist
 		 (magit-gerrit-pretty-print-review num subj owner-name isdraft)
 		 'magit-gerrit-jobj
 		 jobj))
-	(unless (magit-section-hidden (magit-current-section))
+	(unless (oref (magit-current-section) hidden)
 	  (magit-gerrit-wash-approvals approvs))
 	(add-text-properties beg (point) (list 'magit-gerrit-jobj jobj)))
       t)))
@@ -282,7 +290,7 @@ Succeed even if branch already exist
     (when jobj
       (let ((ref (cdr (assoc 'ref (assoc 'currentPatchSet jobj))))
 	    (dir default-directory))
-	(let* ((magit-proc (magit-fetch magit-gerrit-remote ref)))
+	(let* ((magit-proc (magit-fetch-other magit-gerrit-remote ref)))
 	  (message (format "Waiting a git fetch from %s to complete..."
 			   magit-gerrit-remote))
 	  (magit-gerrit-process-wait))
@@ -299,7 +307,7 @@ Succeed even if branch already exist
 	    (branch (format "review/%s/%s"
 			    (cdr (assoc 'username (assoc 'owner jobj)))
 			    (cdr (or (assoc 'topic jobj) (assoc 'number jobj))))))
-	(let* ((magit-proc (magit-fetch magit-gerrit-remote ref)))
+	(let* ((magit-proc (magit-fetch-other magit-gerrit-remote ref)))
 	  (message (format "Waiting a git fetch from %s to complete..."
 			   magit-gerrit-remote))
 	  (magit-gerrit-process-wait))
@@ -400,9 +408,9 @@ Succeed even if branch already exist
 (defun magit-gerrit-push-review (status)
   (let* ((branch (or (magit-get-current-branch)
 		     (error "Don't push a detached head.  That's gross")))
-	 (commitid (or (when (eq (magit-section-type (magit-current-section))
+	 (commitid (or (when (eq (oref (magit-current-section) type)
 				 'commit)
-			 (magit-section-value (magit-current-section)))
+			 (oref (magit-current-section) value))
 		       (error "Couldn't find a commit at point")))
 	 (rev (magit-rev-parse (or commitid
 				   (error "Select a commit for review"))))
@@ -509,10 +517,6 @@ Succeed even if branch already exist
 	     (?b "Browse Review"                                   magit-gerrit-browse-review))
   :options '((?m "Comment"                      "--message "       magit-gerrit-read-comment)))
 
-;; Attach Magit Gerrit to Magit's default help popup
-(magit-define-popup-action 'magit-dispatch-popup (string-to-char magit-gerrit-popup-prefix) "Gerrit"
-  'magit-gerrit-popup)
-
 (magit-define-popup magit-gerrit-copy-review-popup
   "Popup console for copy review to clipboard."
   'magit-gerrit
@@ -561,6 +565,7 @@ Succeed even if branch already exist
   (when (called-interactively-p 'any)
     (magit-refresh)))
 
+;;;###autoload
 (defun magit-gerrit-detect-ssh-creds (remote-url)
   "Derive magit-gerrit-ssh-creds from remote-url.
 Assumes remote-url is a gerrit repo if scheme is ssh
@@ -572,12 +577,16 @@ and port is the default gerrit ssh port."
 	   (format "%s@%s" (url-user url) (url-host url)))
       (message "Detected magit-gerrit-ssh-creds=%s" magit-gerrit-ssh-creds))))
 
+;;;###autoload
 (defun magit-gerrit-check-enable ()
   (let ((remote-url (magit-gerrit-get-remote-url)))
     (when (and remote-url
 	       (or magit-gerrit-ssh-creds
 		   (magit-gerrit-detect-ssh-creds remote-url))
-	       (string-match magit-gerrit-ssh-creds remote-url))
+	       (string-match (or (url-host
+                                  (url-generic-parse-url remote-url))
+                                 "")
+                              magit-gerrit-ssh-creds))
       ;; update keymap with prefix incase it has changed
       (define-key magit-gerrit-mode-map magit-gerrit-popup-prefix 'magit-gerrit-popup)
       (magit-gerrit-mode t))))
@@ -586,6 +595,7 @@ and port is the default gerrit ssh port."
 (add-hook 'magit-status-mode-hook #'hack-dir-local-variables-non-file-buffer t)
 
 ;; Try to auto enable magit-gerrit in the magit-status buffer
+;;;###autoload
 (add-hook 'magit-status-mode-hook #'magit-gerrit-check-enable t)
 (add-hook 'magit-log-mode-hook #'magit-gerrit-check-enable t)
 
